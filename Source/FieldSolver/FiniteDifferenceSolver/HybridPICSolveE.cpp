@@ -22,6 +22,7 @@
 #include <ablastr/coarsen/sample.H>
 
 using namespace amrex;
+using warpx::fields::FieldType;
 
 void FiniteDifferenceSolver::CalculateCurrentAmpere (
     ablastr::fields::VectorField & Jfield,
@@ -472,6 +473,9 @@ void FiniteDifferenceSolver::HybridPICSolveECylindrical (
         Array4<Real const> const& Br = Bfield[0]->const_array(mfi);
         Array4<Real const> const& Bt = Bfield[1]->const_array(mfi);
         Array4<Real const> const& Bz = Bfield[2]->const_array(mfi);
+        Array4<Real const> const& Bextr = Bextfield[0]->const_array(mfi);
+        Array4<Real const> const& Bextt = Bextfield[1]->const_array(mfi);
+        Array4<Real const> const& Bextz = Bextfield[2]->const_array(mfi);
 
         // Loop over the cells and update the nodal E field
         amrex::ParallelFor(mfi.tilebox(), [=] AMREX_GPU_DEVICE (int i, int j, int /*k*/){
@@ -490,6 +494,10 @@ void FiniteDifferenceSolver::HybridPICSolveECylindrical (
             auto const Br_interp = Interp(Br, Br_stag, nodal, coarsen, i, j, 0, 0);
             auto const Bt_interp = Interp(Bt, Bt_stag, nodal, coarsen, i, j, 0, 0);
             auto const Bz_interp = Interp(Bz, Bz_stag, nodal, coarsen, i, j, 0, 0);
+
+            auto const Bextr_interp = Interp(Bextr, Br_stag, nodal, coarsen, i, j, 0, 0);
+            auto const Bextt_interp = Interp(Bextt, Bt_stag, nodal, coarsen, i, j, 0, 0);
+            auto const Bextz_interp = Interp(Bextz, Bz_stag, nodal, coarsen, i, j, 0, 0);
 
             // calculate enE = (J - Ji) x B
             enE_nodal(i, j, 0, 0) = (
@@ -722,6 +730,9 @@ void FiniteDifferenceSolver::HybridPICSolveECartesian (
 
     const bool include_hyper_resistivity_term = (eta_h > 0.) && solve_for_Faraday;
 
+    auto const& warpx = WarpX::GetInstance();
+    ablastr::fields::ConstVectorField Bfield_external = warpx.m_fields.get_alldirs(FieldType::hybrid_bfield_fp_external, 0); // lev=0
+
     // Index type required for interpolating fields from their respective
     // staggering to the Ex, Ey, Ez locations
     amrex::GpuArray<int, 3> const& Ex_stag = hybrid_model->Ex_IndexType;
@@ -777,8 +788,10 @@ void FiniteDifferenceSolver::HybridPICSolveECartesian (
         Array4<Real const> const& Bx = Bfield[0]->const_array(mfi);
         Array4<Real const> const& By = Bfield[1]->const_array(mfi);
         Array4<Real const> const& Bz = Bfield[2]->const_array(mfi);
+        Array4<Real const> const& Bx_ext = Bfield_external[0]->const_array(mfi);
+        Array4<Real const> const& By_ext = Bfield_external[1]->const_array(mfi);
+        Array4<Real const> const& Bz_ext = Bfield_external[2]->const_array(mfi);
 
-        // Loop over the cells and update the nodal E field
         amrex::ParallelFor(mfi.tilebox(), [=] AMREX_GPU_DEVICE (int i, int j, int k){
 
             // interpolate the total plasma current to a nodal grid
@@ -792,9 +805,13 @@ void FiniteDifferenceSolver::HybridPICSolveECartesian (
             auto const jiz_interp = Interp(Jiz, Jz_stag, nodal, coarsen, i, j, k, 0);
 
             // interpolate the B field to a nodal grid
-            auto const Bx_interp = Interp(Bx, Bx_stag, nodal, coarsen, i, j, k, 0);
-            auto const By_interp = Interp(By, By_stag, nodal, coarsen, i, j, k, 0);
-            auto const Bz_interp = Interp(Bz, Bz_stag, nodal, coarsen, i, j, k, 0);
+            auto Bx_interp = Interp(Bx, Bx_stag, nodal, coarsen, i, j, k, 0);
+            auto By_interp = Interp(By, By_stag, nodal, coarsen, i, j, k, 0);
+            auto Bz_interp = Interp(Bz, Bz_stag, nodal, coarsen, i, j, k, 0);
+
+            Bx_interp += Interp(Bx_ext, Bx_stag, nodal, coarsen, i, j, k, 0);
+            By_interp += Interp(By_ext, By_stag, nodal, coarsen, i, j, k, 0);
+            Bz_interp += Interp(Bz_ext, Bz_stag, nodal, coarsen, i, j, k, 0);
 
             // calculate enE = (J - Ji) x B
             enE_nodal(i, j, k, 0) = (
