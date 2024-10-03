@@ -144,6 +144,7 @@ class FiniteDifferenceSolver
           * \param[in] Jfield   vector of total plasma current MultiFabs at a given level
           * \param[in] Jifield  vector of ion current density MultiFabs at a given level
           * \param[in] Bfield   vector of magnetic field MultiFabs at a given level
+          * \param[in] Bextfield  vector of external magnetic field MultiFabs at a given level
           * \param[in] rhofield scalar ion charge density Multifab at a given level
           * \param[in] Pefield  scalar electron pressure MultiFab at a given level
           * \param[in] edge_lengths length of edges along embedded boundaries

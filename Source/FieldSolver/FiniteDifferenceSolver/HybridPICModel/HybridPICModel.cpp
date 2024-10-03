@@ -16,6 +16,7 @@
 using namespace amrex;
 using warpx::fields::FieldType;
 
+
 HybridPICModel::HybridPICModel ()
 {
     ReadParameters();
@@ -53,11 +54,31 @@ void HybridPICModel::ReadParameters ()
     pp_hybrid.query("Jx_external_grid_function(x,y,z,t)", m_Jx_ext_grid_function);
     pp_hybrid.query("Jy_external_grid_function(x,y,z,t)", m_Jy_ext_grid_function);
     pp_hybrid.query("Jz_external_grid_function(x,y,z,t)", m_Jz_ext_grid_function);
+
+    pp_hybrid.query("J_external_init_style", m_J_ext_grid_style);
+
+    if (m_J_ext_grid_style == "read_from_file") {
+        pp_hybrid.get("read_j_fields_from_path", m_external_j_fields_path);
+    }
+
+    // external magnetic field
+    pp_hybrid.query("Bx_external_grid_function(x,y,z,t)", m_Bx_ext_grid_function);
+    pp_hybrid.query("By_external_grid_function(x,y,z,t)", m_By_ext_grid_function);
+    pp_hybrid.query("Bz_external_grid_function(x,y,z,t)", m_Bz_ext_grid_function);
+
+    pp_hybrid.query("B_external_init_style", m_B_ext_grid_style);
+
+    if (m_B_ext_grid_style == "read_from_file"){
+        pp_hybrid.get("read_b_fields_from_path", m_external_b_fields_path);
+    }
 }
 
 void HybridPICModel::AllocateLevelMFs (ablastr::fields::MultiFabRegister & fields,
                                        int lev, const BoxArray& ba, const DistributionMapping& dm,
-                                       const int ncomps, const IntVect& ngJ, const IntVect& ngRho,
+                                       const int ncomps, const IntVect& ngEB, const IntVect& ngJ, const IntVect& ngRho,
+                                       const IntVect& Bx_nodal_flag,
+                                       const IntVect& By_nodal_flag,
+                                       const IntVect& Bz_nodal_flag,
                                        const IntVect& jx_nodal_flag,
                                        const IntVect& jy_nodal_flag,
                                        const IntVect& jz_nodal_flag,
@@ -113,6 +134,13 @@ void HybridPICModel::AllocateLevelMFs (ablastr::fields::MultiFabRegister & field
         lev, amrex::convert(ba, jz_nodal_flag),
         dm, ncomps, IntVect(1), 0.0_rt);
 
+    fields.alloc_init(FieldType::hybrid_bfield_fp_external, Direction{0},
+        lev, amrex::convert(ba, Bx_nodal_flag), dm, ncomps, ngEB, 0.0_rt);
+    fields.alloc_init(FieldType::hybrid_bfield_fp_external, Direction{1},
+        lev, amrex::convert(ba, By_nodal_flag), dm, ncomps, ngEB, 0.0_rt);
+    fields.alloc_init(FieldType::hybrid_bfield_fp_external, Direction{2},
+        lev, amrex::convert(ba, Bz_nodal_flag), dm, ncomps, ngEB, 0.0_rt);
+
 #ifdef WARPX_DIM_RZ
     WARPX_ALWAYS_ASSERT_WITH_MESSAGE(
         (ncomps == 1),
@@ -141,8 +169,29 @@ void HybridPICModel::InitData ()
     // check if the external current parsers depend on time
     for (int i=0; i<3; i++) {
         const std::set<std::string> J_ext_symbols = m_J_external_parser[i]->symbols();
-        m_external_field_has_time_dependence += J_ext_symbols.count("t");
+        m_external_jfield_has_time_dependence += J_ext_symbols.count("t");
     }
+
+    m_B_external_parser[0] = std::make_unique<amrex::Parser>(
+        utils::parser::makeParser(m_Bx_ext_grid_function,{"x","y","z","t"}));
+    m_B_external_parser[1] = std::make_unique<amrex::Parser>(
+        utils::parser::makeParser(m_By_ext_grid_function,{"x","y","z","t"}));
+    m_B_external_parser[2] = std::make_unique<amrex::Parser>(
+        utils::parser::makeParser(m_Bz_ext_grid_function,{"x","y","z","t"}));
+    m_B_external[0] = m_B_external_parser[0]->compile<4>();
+    m_B_external[1] = m_B_external_parser[1]->compile<4>();
+    m_B_external[2] = m_B_external_parser[2]->compile<4>();
+
+    // check if the external b field parsers depend on time
+    for (int i=0; i<3; i++) {
+        const std::set<std::string> B_ext_symbols = m_B_external_parser[i]->symbols();
+        m_external_bfield_has_time_dependence += B_ext_symbols.count("t");
+    }
+
+    WARPX_ALWAYS_ASSERT_WITH_MESSAGE(
+        !m_external_bfield_has_time_dependence,
+        "The hybrid-PIC algorithm does not work with time dependent external magnetic fields."
+    );
 
     auto & warpx = WarpX::GetInstance();
     using ablastr::fields::Direction;
@@ -221,20 +270,63 @@ void HybridPICModel::InitData ()
     // if the current is time dependent which is what needs to be done to
     // write time independent fields on the first step.
     for (int lev = 0; lev <= warpx.finestLevel(); ++lev) {
-        warpx.ComputeExternalFieldOnGridUsingParser(
-            FieldType::hybrid_current_fp_external,
-            m_J_external[0],
-            m_J_external[1],
-            m_J_external[2],
-            lev, PatchType::fine, 'e',
-            warpx.m_fields.get_alldirs(FieldType::edge_lengths, lev),
-            warpx.m_fields.get_alldirs(FieldType::face_areas, lev));
+        if (m_J_ext_grid_style == "parse_j_ext_grid_function") {
+            warpx.ComputeExternalFieldOnGridUsingParser(
+                FieldType::hybrid_current_fp_external,
+                m_J_external[0],
+                m_J_external[1],
+                m_J_external[2],
+                lev, PatchType::fine, 'e',
+                warpx.m_fields.get_alldirs(FieldType::edge_lengths, lev),
+                warpx.m_fields.get_alldirs(FieldType::face_areas, lev));
+        }
+
+        if (m_J_ext_grid_style == "read_from_file") {
+            warpx.ReadExternalFieldFromFile(
+                m_external_j_fields_path,
+                warpx.m_fields.get(FieldType::hybrid_current_fp_external, Direction{0}, lev),
+                "J", "x");
+            warpx.ReadExternalFieldFromFile(
+                m_external_j_fields_path,
+                warpx.m_fields.get(FieldType::hybrid_current_fp_external, Direction{1}, lev),
+                "J", "y");
+            warpx.ReadExternalFieldFromFile(
+                m_external_j_fields_path,
+                warpx.m_fields.get(FieldType::hybrid_current_fp_external, Direction{2}, lev),
+                "J", "z");
+        }
+
+        if (m_B_ext_grid_style == "parse_b_ext_grid_function") {
+            warpx.ComputeExternalFieldOnGridUsingParser(
+                FieldType::hybrid_bfield_fp_external,
+                m_B_external[0],
+                m_B_external[1],
+                m_B_external[2],
+                lev, PatchType::fine, 'f',
+                warpx.m_fields.get_alldirs(FieldType::edge_lengths, lev),
+                warpx.m_fields.get_alldirs(FieldType::face_areas, lev));
+        }
+
+        if (m_B_ext_grid_style == "read_from_file") {
+            warpx.ReadExternalFieldFromFile(
+                m_external_b_fields_path,
+                warpx.m_fields.get(FieldType::hybrid_bfield_fp_external, Direction{0}, lev),
+                "B", "x");
+            warpx.ReadExternalFieldFromFile(
+                m_external_b_fields_path,
+                warpx.m_fields.get(FieldType::hybrid_bfield_fp_external, Direction{1}, lev),
+                "B", "y");
+            warpx.ReadExternalFieldFromFile(
+                m_external_b_fields_path,
+                warpx.m_fields.get(FieldType::hybrid_bfield_fp_external, Direction{2}, lev),
+                "B", "z");
+        }
     }
 }
 
 void HybridPICModel::GetCurrentExternal ()
 {
-    if (!m_external_field_has_time_dependence) { return; }
+    if (!m_external_jfield_has_time_dependence) { return; }
 
     auto& warpx = WarpX::GetInstance();
     for (int lev = 0; lev <= warpx.finestLevel(); ++lev)
