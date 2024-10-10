@@ -7,13 +7,15 @@
 #include <cmath>
 #include <algorithm>
 #include <regex>
-#include <boost/geometry.hpp>
+#include <boost/geometry/io/wkt/read.hpp>
 #include <boost/geometry/geometries/point_xy.hpp>
 #include <boost/geometry/geometries/polygon.hpp>
 #include <boost/geometry/geometries/multi_polygon.hpp>
+
 typedef boost::geometry::model::d2::point_xy<amrex::Real> point_t;
 typedef boost::geometry::model::polygon<point_t> polygon_t;
 typedef boost::geometry::model::multi_polygon<polygon_t> mpolygon_t;
+
 namespace
 {
     // For all implicit functions, >0: body; =0: boundary; <0: fluid

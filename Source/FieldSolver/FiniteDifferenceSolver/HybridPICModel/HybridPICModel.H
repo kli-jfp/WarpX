@@ -78,6 +78,17 @@ public:
         int lev
     );
 
+    void ReadScalarFieldFromFile (
+        std::string const& scalar_file,
+        amrex::MultiFab& scalar_field
+    );
+
+    void ComputeExternalScalarFieldOnGridUsingParser (
+        warpx::fields::FieldType field,
+        amrex::ParserExecutor<3> const& scalar_parser,
+        int lev, PatchType patch_type
+    );
+
     /**
      * \brief
      * Function to update the E-field using Ohm's law (hybrid-PIC model).
@@ -146,11 +157,14 @@ public:
      * charge density (and assumption of quasi-neutrality) using the user
      * specified electron equation of state.
      *
-     * \param[out] Pe_filed scalar electron pressure MultiFab at a given level
+     * \param[out] Pe_field scalar electron pressure MultiFab at a given level
+     * \param[in] Te_field scalar electron temperture Multifab at a given level
      * \param[in] rho_field scalar ion charge density Multifab at a given level
      */
+
     void FillElectronPressureMF (
         amrex::MultiFab& Pe_field,
+        amrex::MultiFab const& Te_field,
         amrex::MultiFab const& rho_field ) const;
 
     // Declare variables to hold hybrid-PIC model parameters
@@ -158,7 +172,12 @@ public:
     int m_substeps = 10;
 
     /** Electron temperature in eV */
-    amrex::Real m_elec_temp;
+    std::string m_elec_temp_expression = "0.0";
+    std::unique_ptr<amrex::Parser> m_elec_temp_parser;
+    amrex::ParserExecutor<3> m_elec_temp;
+    std::string m_elec_temp_field_path = "0.0";
+    std::string m_elec_temp_style = "0.0";
+
     /** Reference electron density */
     amrex::Real m_n0_ref = 1.0;
     /** Electron pressure scaling exponent */
