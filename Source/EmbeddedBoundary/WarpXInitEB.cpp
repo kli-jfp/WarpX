@@ -138,7 +138,7 @@ WarpX::InitEB ()
 #else
         r_data = r_vec.data();
         z_data = z_vec.data();
-        jump_data = z_vec.data();
+        jump_data = jump_data.data();
 #endif
         PolygonXYIF polygonXY(r_data, z_data, r_vec.size(), jump_data, jump_vec.size());
         auto latheif = amrex::EB2::lathe(polygonXY);
