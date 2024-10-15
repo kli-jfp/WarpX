@@ -32,6 +32,9 @@ namespace EB
         std::string eb_stl;
         eb_enabled |= pp_eb2.query("geom_type", eb_stl);
 
+        std::string wkt_file;
+        eb_enabled |= pp_warpx.query("wkt_file", wkt_file);
+
         return eb_enabled;
 #endif
     }
