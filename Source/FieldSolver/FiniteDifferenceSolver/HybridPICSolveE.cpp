@@ -915,7 +915,7 @@ void FiniteDifferenceSolver::HybridPICSolveECartesian (
                 if (solve_for_Faraday) { Ex(i, j, k) += eta(rho_val, jtot_val) * Jx(i, j, k); }
 
                 if (include_hyper_resistivity_term) {
-                    auto nabla2Jx = T_Algo::Dxx(Jx, coefs_x, n_coefs_x, i, j, k);
+                    auto nabla2Jx = T_Algo::DxxFourthOrder(Jx, coefs_x, n_coefs_x, i, j, k);
                     Ex(i, j, k) -= eta_h * nabla2Jx;
                 }
             },
@@ -959,7 +959,7 @@ void FiniteDifferenceSolver::HybridPICSolveECartesian (
                 if (solve_for_Faraday) { Ey(i, j, k) += eta(rho_val, jtot_val) * Jy(i, j, k); }
 
                 if (include_hyper_resistivity_term) {
-                    auto nabla2Jy = T_Algo::Dyy(Jy, coefs_y, n_coefs_y, i, j, k);
+                    auto nabla2Jy = T_Algo::DyyFourthOrder(Jy, coefs_y, n_coefs_y, i, j, k);
                     Ey(i, j, k) -= eta_h * nabla2Jy;
                 }
             },
@@ -999,7 +999,7 @@ void FiniteDifferenceSolver::HybridPICSolveECartesian (
                 if (solve_for_Faraday) { Ez(i, j, k) += eta(rho_val, jtot_val) * Jz(i, j, k); }
 
                 if (include_hyper_resistivity_term) {
-                    auto nabla2Jz = T_Algo::Dzz(Jz, coefs_z, n_coefs_z, i, j, k);
+                    auto nabla2Jz = T_Algo::DzzFourthOrder(Jz, coefs_z, n_coefs_z, i, j, k);
                     Ez(i, j, k) -= eta_h * nabla2Jz;
                 }
             }

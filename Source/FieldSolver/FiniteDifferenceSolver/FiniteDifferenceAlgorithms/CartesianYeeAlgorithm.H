@@ -119,6 +119,27 @@ struct CartesianYeeAlgorithm {
 #endif
     }
 
+    template< typename T_Field>
+    AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
+    static amrex::Real DxxFourthOrder (
+        T_Field const& F,
+        amrex::Real const * const coefs_x, int const /*n_coefs_x*/,
+        int const i, int const j, int const k, int const ncomp=0 ) {
+
+        using namespace amrex;
+#if (defined WARPX_DIM_1D_Z)
+        amrex::ignore_unused(F, coefs_x, i, j, k, ncomp);
+        return 0._rt; // 1D Cartesian: derivative along x is 0
+#else
+        amrex::Real const inv_dx2 = coefs_x[0]*coefs_x[0];
+return inv_dx2 * (
+                - F(i-2,j,k,ncomp) + 16._rt * F(i-1,j,k,ncomp)
+                - 30._rt * F(i,j,k,ncomp)
+                + 16._rt * F(i+1,j,k,ncomp) - F(i+2,j,k,ncomp)
+        ) / 12._rt;
+#endif
+    }
+
     /**
      * Perform derivative along y on a cell-centered grid, from a nodal field `F`*/
     AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
@@ -186,6 +207,30 @@ struct CartesianYeeAlgorithm {
     }
 
     /**
+    * Perform second derivative along y on a nodal grid, from a cell-centered field `F`
+    */
+    template< typename T_Field>
+    AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
+    static amrex::Real DyyFourthOrder (
+        T_Field const& F,
+        amrex::Real const * const coefs_y, int const /*n_coefs_y*/,
+        int const i, int const j, int const k, int const ncomp=0 ) {
+
+        using namespace amrex;
+#if defined WARPX_DIM_3D
+        Real const inv_dy2 = coefs_y[0]*coefs_y[0];
+        return inv_dy2 * (
+                - F(i,j-2,k,ncomp) + 16._rt * F(i,j-1,k,ncomp)
+                - 30._rt * F(i,j,k,ncomp)
+                + 16._rt * F(i,j+1,k,ncomp) - F(i,j+2,k,ncomp)
+        ) / 12._rt;
+#elif (defined WARPX_DIM_XZ || WARPX_DIM_1D_Z)
+        amrex::ignore_unused(F, coefs_y, i, j, k, ncomp);
+        return 0._rt; // 1D and 2D Cartesian: derivative along y is 0
+#endif
+    }
+
+    /**
      * Perform derivative along z on a cell-centered grid, from a nodal field `F`*/
    AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
     static amrex::Real UpwardDz (
@@ -243,6 +288,40 @@ struct CartesianYeeAlgorithm {
         return inv_dz2*( F(i-1,j,k,ncomp) - 2._rt*F(i,j,k,ncomp) + F(i+1,j,k,ncomp) );
 #endif
     }
+
+    /**
+    * Perform second derivative along z on a cell-centered field `F`
+    */
+    template< typename T_Field>
+    AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
+    static amrex::Real DzzFourthOrder (
+        T_Field const& F,
+        amrex::Real const * const coefs_z, int const /*n_coefs_z*/,
+        int const i, int const j, int const k, int const ncomp=0 ) {
+
+        using namespace amrex;
+        Real const inv_dz2 = coefs_z[0]*coefs_z[0];
+#if defined WARPX_DIM_3D
+        return inv_dz2 * (
+                - F(i,j,k-2,ncomp) + 16._rt * F(i,j,k-1,ncomp)
+                - 30._rt * F(i,j,k,ncomp)
+                + 16._rt * F(i,j,k+1,ncomp) - F(i,j,k+2,ncomp)
+        ) / 12._rt;
+#elif (defined WARPX_DIM_XZ)
+        return inv_dz2 * (
+                - F(i,j-2,k,ncomp) + 16._rt * F(i,j-1,k,ncomp)
+                - 30._rt * F(i,j,k,ncomp)
+                + 16._rt * F(i,j+1,k,ncomp) - F(i,j+2,k,ncomp)
+        ) / 12._rt;
+#elif (defined WARPX_DIM_1D_Z)
+        return inv_dz2 * (
+                - F(i-2,j,k,ncomp) + 16._rt * F(i-1,j,k,ncomp)
+                - 30._rt * F(i,j,k,ncomp)
+                + 16._rt * F(i+1,j,k,ncomp) - F(i+2,j,k,ncomp)
+        ) / 12._rt;
+#endif
+    }
+
 
 };
 
