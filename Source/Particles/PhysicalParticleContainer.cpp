@@ -689,21 +689,8 @@ void PhysicalParticleContainer::AddPlasmaFromFile(PlasmaInjector & plasma_inject
 
         auto const npart = ps["position"]["x"].getExtent()[0];
 
-        int num_chunks = 1; // Default value
-
-        try {
-            // Attempt to get the 'num_chunks' attribute
-            openPMD::Attribute num_chunks_attr = series->getAttribute("num_chunks");
-            num_chunks = num_chunks_attr.get<int>();
-        } catch (const openPMD::no_such_attribute_error&) {
-            // Attribute does not exist, use default value
-            num_chunks = 1;
-        } catch (const std::bad_cast&) {
-            // Attribute exists but is not of type int, use default value
-            num_chunks = 1;
-        }
-
-        int chunk_size = npart / num_chunks;
+        int chunk_size = std::min(static_cast<std::size_t>(npart), static_cast<std::size_t>(65536)); // Set chunk size
+        int num_chunks = (npart + chunk_size - 1) / chunk_size; // Calculate number of chunks
 
         // Define and initialize t_lab
         double t_lab = 0.0;
@@ -724,9 +711,7 @@ void PhysicalParticleContainer::AddPlasmaFromFile(PlasmaInjector & plasma_inject
 
         for (int chunk = 0; chunk < num_chunks; ++chunk) {
             std::size_t start = static_cast<std::size_t>(chunk * chunk_size);
-            std::size_t end = static_cast<std::size_t>((chunk == num_chunks - 1) ? npart : start + chunk_size);
-
-            std::cout << "start: " << start << ", end: " << end << std::endl;
+            std::size_t end = std::min(static_cast<std::size_t>(start + chunk_size), static_cast<std::size_t>(npart));
 
 #if !defined(WARPX_DIM_1D_Z)
             const std::shared_ptr<ParticleReal> ptr_x = ps["position"]["x"].loadChunk<ParticleReal>({start}, {end - start});
@@ -809,136 +794,6 @@ void PhysicalParticleContainer::AddPlasmaFromFile(PlasmaInjector & plasma_inject
 
     ignore_unused(plasma_injector, q_tot, z_shift);
 }
-
-/*
-void
-PhysicalParticleContainer::AddPlasmaFromFile(PlasmaInjector & plasma_injector,
-                                             ParticleReal q_tot,
-                                             ParticleReal z_shift)
-{
-    // Declare temporary vectors on the CPU
-    Gpu::HostVector<ParticleReal> particle_x;
-    Gpu::HostVector<ParticleReal> particle_z;
-    Gpu::HostVector<ParticleReal> particle_ux;
-    Gpu::HostVector<ParticleReal> particle_uz;
-    Gpu::HostVector<ParticleReal> particle_w;
-    Gpu::HostVector<ParticleReal> particle_y;
-    Gpu::HostVector<ParticleReal> particle_uy;
-
-#ifdef WARPX_USE_OPENPMD
-    //TODO: Make changes for read/write in multiple MPI ranks
-    if (ParallelDescriptor::IOProcessor()) {
-        // take ownership of the series and close it when done
-        auto series = std::move(plasma_injector.m_openpmd_input_series);
-
-        // assumption asserts: see PlasmaInjector
-        openPMD::Iteration it = series->iterations.begin()->second;
-        const ParmParse pp_species_name(species_name);
-        pp_species_name.query("impose_t_lab_from_file", impose_t_lab_from_file);
-        double t_lab = 0._prt;
-        if (impose_t_lab_from_file) {
-            // Impose t_lab as being the time stored in the openPMD file
-            t_lab = it.time<double>() * it.timeUnitSI();
-        }
-        std::string const ps_name = it.particles.begin()->first;
-        openPMD::ParticleSpecies ps = it.particles.begin()->second;
-
-        auto const npart = ps["position"]["x"].getExtent()[0];
-#if !defined(WARPX_DIM_1D_Z)  // 2D, 3D, and RZ
-        const std::shared_ptr<ParticleReal> ptr_x = ps["position"]["x"].loadChunk<ParticleReal>();
-        const std::shared_ptr<ParticleReal> ptr_offset_x = ps["positionOffset"]["x"].loadChunk<ParticleReal>();
-        auto const position_unit_x = static_cast<ParticleReal>(ps["position"]["x"].unitSI());
-        auto const position_offset_unit_x = static_cast<ParticleReal>(ps["positionOffset"]["x"].unitSI());
-#endif
-#if !(defined(WARPX_DIM_XZ) || defined(WARPX_DIM_1D_Z))
-        const std::shared_ptr<ParticleReal> ptr_y = ps["position"]["y"].loadChunk<ParticleReal>();
-        const std::shared_ptr<ParticleReal> ptr_offset_y = ps["positionOffset"]["y"].loadChunk<ParticleReal>();
-        auto const position_unit_y = static_cast<ParticleReal>(ps["position"]["y"].unitSI());
-        auto const position_offset_unit_y = static_cast<ParticleReal>(ps["positionOffset"]["y"].unitSI());
-#endif
-        const std::shared_ptr<ParticleReal> ptr_z = ps["position"]["z"].loadChunk<ParticleReal>();
-        const std::shared_ptr<ParticleReal> ptr_offset_z = ps["positionOffset"]["z"].loadChunk<ParticleReal>();
-        auto const position_unit_z = static_cast<ParticleReal>(ps["position"]["z"].unitSI());
-        auto const position_offset_unit_z = static_cast<ParticleReal>(ps["positionOffset"]["z"].unitSI());
-
-        const std::shared_ptr<ParticleReal> ptr_ux = ps["momentum"]["x"].loadChunk<ParticleReal>();
-        auto const momentum_unit_x = static_cast<ParticleReal>(ps["momentum"]["x"].unitSI());
-        const std::shared_ptr<ParticleReal> ptr_uz = ps["momentum"]["z"].loadChunk<ParticleReal>();
-        auto const momentum_unit_z = static_cast<ParticleReal>(ps["momentum"]["z"].unitSI());
-        const std::shared_ptr<ParticleReal> ptr_w = ps["weighting"][openPMD::RecordComponent::SCALAR].loadChunk<ParticleReal>();
-        auto const w_unit = static_cast<ParticleReal>(ps["weighting"][openPMD::RecordComponent::SCALAR].unitSI());
-        std::shared_ptr<ParticleReal> ptr_uy = nullptr;
-        auto momentum_unit_y = 1.0_prt;
-        if (ps["momentum"].contains("y")) {
-            ptr_uy = ps["momentum"]["y"].loadChunk<ParticleReal>();
-            momentum_unit_y = static_cast<ParticleReal>(ps["momentum"]["y"].unitSI());
-        }
-        series->flush();  // shared_ptr data can be read now
-
-        if (q_tot != 0.0) {
-            std::stringstream warnMsg;
-            warnMsg << " Loading particle species from file. " << ps_name << ".q_tot is ignored.";
-            ablastr::warn_manager::WMRecordWarning("AddPlasmaFromFile",
-               warnMsg.str(), ablastr::warn_manager::WarnPriority::high);
-        }
-
-        for (auto i = decltype(npart){0}; i<npart; ++i){
-
-            ParticleReal const weight = ptr_w.get()[i]*w_unit;
-
-#if !defined(WARPX_DIM_1D_Z)
-            ParticleReal const x = ptr_x.get()[i]*position_unit_x + ptr_offset_x.get()[i]*position_offset_unit_x;
-#else
-            ParticleReal const x = 0.0_prt;
-#endif
-#if defined(WARPX_DIM_3D) || defined(WARPX_DIM_RZ)
-            ParticleReal const y = ptr_y.get()[i]*position_unit_y + ptr_offset_y.get()[i]*position_offset_unit_y;
-#else
-            ParticleReal const y = 0.0_prt;
-#endif
-            ParticleReal const z = ptr_z.get()[i]*position_unit_z + ptr_offset_z.get()[i]*position_offset_unit_z + z_shift;
-
-            if (plasma_injector.insideBounds(x, y, z)) {
-                ParticleReal const ux = ptr_ux.get()[i]*momentum_unit_x/mass;
-                ParticleReal const uz = ptr_uz.get()[i]*momentum_unit_z/mass;
-                ParticleReal uy = 0.0_prt;
-                if (ps["momentum"].contains("y")) {
-                    uy = ptr_uy.get()[i]*momentum_unit_y/mass;
-                }
-                CheckAndAddParticle(x, y, z, ux, uy, uz, weight,
-                                    particle_x,  particle_y,  particle_z,
-                                    particle_ux, particle_uy, particle_uz,
-                                    particle_w, static_cast<amrex::Real>(t_lab));
-            }
-        }
-        auto const np = particle_z.size();
-        if (np < npart) {
-            ablastr::warn_manager::WMRecordWarning("Species",
-                "Simulation box doesn't cover all particles",
-                ablastr::warn_manager::WarnPriority::high);
-        }
-    } // IO Processor
-    auto const np = static_cast<long>(particle_z.size());
-    const amrex::Vector<ParticleReal> xp(particle_x.data(), particle_x.data() + np);
-    const amrex::Vector<ParticleReal> yp(particle_y.data(), particle_y.data() + np);
-    const amrex::Vector<ParticleReal> zp(particle_z.data(), particle_z.data() + np);
-    const amrex::Vector<ParticleReal> uxp(particle_ux.data(), particle_ux.data() + np);
-    const amrex::Vector<ParticleReal> uyp(particle_uy.data(), particle_uy.data() + np);
-    const amrex::Vector<ParticleReal> uzp(particle_uz.data(), particle_uz.data() + np);
-
-    amrex::Vector<amrex::Vector<ParticleReal>> attr;
-    const amrex::Vector<ParticleReal> wp(particle_w.data(), particle_w.data() + np);
-    attr.push_back(wp);
-
-    const amrex::Vector<amrex::Vector<int>> attr_int;
-
-    AddNParticles(0, np, xp,  yp,  zp, uxp, uyp, uzp,
-                  1, attr, 0, attr_int, 1);
-#endif // WARPX_USE_OPENPMD
-
-    ignore_unused(plasma_injector, q_tot, z_shift);
-}
-*/
 
 void
 PhysicalParticleContainer::DefaultInitializeRuntimeAttributes (

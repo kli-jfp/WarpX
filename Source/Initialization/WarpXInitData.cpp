@@ -1619,9 +1619,9 @@ WarpX::ReadExternalFieldFromFile (
         // Define the grid for the external field data
         std::vector<amrex::Real> grid_x(extent[0]);
         std::vector<amrex::Real> grid_y(extent[1]);
-    #if defined(WARPX_DIM_3D)
+#if defined(WARPX_DIM_3D)
         std::vector<amrex::Real> grid_z(extent[2]);
-    #endif
+#endif
 
         for (size_t idx = 0; idx < extent[0]; ++idx) {
             grid_x[idx] = offset0 + idx * file_dx;
@@ -1629,21 +1629,21 @@ WarpX::ReadExternalFieldFromFile (
         for (size_t idy = 0; idy < extent[1]; ++idy) {
             grid_y[idy] = offset1 + idy * file_dy;
         }
-    #if defined(WARPX_DIM_3D)
+#if defined(WARPX_DIM_3D)
         for (size_t idz = 0; idz < extent[2]; ++idz) {
             grid_z[idz] = offset2 + idz * file_dz;
         }
-    #endif
+#endif
 
         // Find the start and end indices for the local box in the external field data
         auto start_x = std::lower_bound(grid_x.begin(), grid_x.end(), local_box_lo[0]);
         auto end_x = std::upper_bound(grid_x.begin(), grid_x.end(), local_box_hi[0]);
         auto start_y = std::lower_bound(grid_y.begin(), grid_y.end(), local_box_lo[1]);
         auto end_y = std::upper_bound(grid_y.begin(), grid_y.end(), local_box_hi[1]);
-    #if defined(WARPX_DIM_3D)
+#if defined(WARPX_DIM_3D)
         auto start_z = std::lower_bound(grid_z.begin(), grid_z.end(), local_box_lo[2]);
         auto end_z = std::upper_bound(grid_z.begin(), grid_z.end(), local_box_hi[2]);
-    #endif
+#endif
 
         // Calculate chunk offset and extent based on the current box
         openPMD::Offset chunk_offset = {
