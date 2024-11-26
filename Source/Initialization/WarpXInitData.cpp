@@ -1497,8 +1497,6 @@ WarpX::LoadExternalFields (int const lev)
 #endif
     }
 }
-
-
 #if defined(WARPX_USE_OPENPMD) && !defined(WARPX_DIM_1D_Z) && !defined(WARPX_DIM_XZ)
 void
 WarpX::ReadExternalFieldFromFile (
@@ -1511,12 +1509,6 @@ WarpX::ReadExternalFieldFromFile (
     const amrex::RealBox& real_box = geom0.ProbDomain();
     const auto dx = geom0.CellSizeArray();
     const amrex::IntVect nodal_flag = mf->ixType().toIntVect();
-
-    // Get the global domain minimum boundaries
-    const amrex::Real* global_domain_min = geom0.ProbLo();
-    const amrex::Real* global_domain_max = geom0.ProbHi();
-
-    const amrex::Box& global_box = geom0.Domain();
 
     // Read external field openPMD data
     auto series = openPMD::Series(read_fields_from_path, openPMD::Access::READ_ONLY);
@@ -1567,127 +1559,33 @@ WarpX::ReadExternalFieldFromFile (
 
     auto FC = F[F_component];
     const auto extent = FC.getExtent();
-/*
-    // Calculate the lower and upper bounds of the domain of the FC
-    amrex::Real lower_bound_x = offset0;
-    amrex::Real upper_bound_x = offset0 + extent[0] * static_cast<amrex::Real>(d[0]);
-    amrex::Real lower_bound_y = offset1;
-    amrex::Real upper_bound_y = offset1 + extent[1] * static_cast<amrex::Real>(d[1]);
-#if defined(WARPX_DIM_3D)
-    amrex::Real lower_bound_z = offset2;
-    amrex::Real upper_bound_z = offset2 + extent[2] * static_cast<amrex::Real>(d[2]);
-#endif
+    const auto extent0 = static_cast<int>(extent[0]);
+    const auto extent1 = static_cast<int>(extent[1]);
+    const auto extent2 = static_cast<int>(extent[2]);
 
-    amrex::Print() << "Lower bounds: (" << lower_bound_x << ", " << lower_bound_y
-#if defined(WARPX_DIM_3D)
-               << ", " << lower_bound_z
-#endif
-               << ")\n";
-    amrex::Print() << "Upper bounds: (" << upper_bound_x << ", " << upper_bound_y
-#if defined(WARPX_DIM_3D)
-               << ", " << upper_bound_z
-#endif
-               << ")\n";
-*/
+    // Determine the chunk data that will be loaded.
+    // Now, the full range of data is loaded.
+    // Loading chunk data can speed up the process.
+    // Thus, `chunk_offset` and `chunk_extent` should be modified accordingly in another PR.
+    const openPMD::Offset chunk_offset = {0,0,0};
+    const openPMD::Extent chunk_extent = {extent[0], extent[1], extent[2]};
+
+    auto FC_chunk_data = FC.loadChunk<double>(chunk_offset,chunk_extent);
+    series.flush();
+    auto *FC_data_host = FC_chunk_data.get();
+
+    // Load data to GPU
+    const size_t total_extent = size_t(extent[0]) * extent[1] * extent[2];
+    amrex::Gpu::DeviceVector<double> FC_data_gpu(total_extent);
+    auto *FC_data = FC_data_gpu.data();
+    amrex::Gpu::copy(amrex::Gpu::hostToDevice, FC_data_host, FC_data_host + total_extent, FC_data);
 
     // Loop over boxes
-    for (MFIter mfi(*mf, TilingIfNotGPU()); mfi.isValid(); ++mfi) {
-        const amrex::Box& local_box = mfi.validbox();
+    for (MFIter mfi(*mf, TilingIfNotGPU()); mfi.isValid(); ++mfi)
+    {
         const amrex::Box box = mfi.growntilebox();
         const amrex::Box tb = mfi.tilebox(nodal_flag, mf->nGrowVect());
         auto const& mffab = mf->array(mfi);
-
-        // Calculate the lower and upper bounds of the local box
-        amrex::Real local_box_lo[3], local_box_hi[3];
-        for (int idim = 0; idim < AMREX_SPACEDIM; ++idim) {
-            local_box_lo[idim] = global_domain_min[idim] + local_box.smallEnd(idim) * dx[idim];
-            local_box_hi[idim] = global_domain_min[idim] + (local_box.bigEnd(idim) + 1) * dx[idim];
-        }
-/*
-        amrex::Print() << "local_box_lo: (" << local_box_lo[0] << ", " << local_box_lo[1]
-#if defined(WARPX_DIM_3D)
-                   << ", " << local_box_lo[2]
-#endif
-                   << ")\n";
-        amrex::Print() << "local_box_hi: (" << local_box_hi[0] << ", " << local_box_hi[1]
-#if defined(WARPX_DIM_3D)
-                   << ", " << local_box_hi[2]
-#endif
-                   << ")\n";
-*/
-
-        // Define the grid for the external field data
-        std::vector<amrex::Real> grid_x(extent[0]);
-        std::vector<amrex::Real> grid_y(extent[1]);
-#if defined(WARPX_DIM_3D)
-        std::vector<amrex::Real> grid_z(extent[2]);
-#endif
-
-        for (size_t idx = 0; idx < extent[0]; ++idx) {
-            grid_x[idx] = offset0 + idx * file_dx;
-        }
-        for (size_t idy = 0; idy < extent[1]; ++idy) {
-            grid_y[idy] = offset1 + idy * file_dy;
-        }
-#if defined(WARPX_DIM_3D)
-        for (size_t idz = 0; idz < extent[2]; ++idz) {
-            grid_z[idz] = offset2 + idz * file_dz;
-        }
-#endif
-
-        // Find the start and end indices for the local box in the external field data
-        auto start_x = std::lower_bound(grid_x.begin(), grid_x.end(), local_box_lo[0]);
-        auto end_x = std::upper_bound(grid_x.begin(), grid_x.end(), local_box_hi[0]);
-        auto start_y = std::lower_bound(grid_y.begin(), grid_y.end(), local_box_lo[1]);
-        auto end_y = std::upper_bound(grid_y.begin(), grid_y.end(), local_box_hi[1]);
-#if defined(WARPX_DIM_3D)
-        auto start_z = std::lower_bound(grid_z.begin(), grid_z.end(), local_box_lo[2]);
-        auto end_z = std::upper_bound(grid_z.begin(), grid_z.end(), local_box_hi[2]);
-#endif
-
-        // Calculate chunk offset and extent based on the current box
-        openPMD::Offset chunk_offset = {
-            static_cast<std::uint64_t>(std::distance(grid_x.begin(), start_x)),
-            static_cast<std::uint64_t>(std::distance(grid_y.begin(), start_y)),
-#if defined(WARPX_DIM_3D)
-            static_cast<std::uint64_t>(std::distance(grid_z.begin(), start_z))
-#endif
-        };
-        openPMD::Extent chunk_extent = {
-            static_cast<std::uint64_t>(std::distance(start_x, end_x)),
-            static_cast<std::uint64_t>(std::distance(start_y, end_y)),
-#if defined(WARPX_DIM_3D)
-            static_cast<std::uint64_t>(std::distance(start_z, end_z))
-#endif
-        };
-
-        const auto extent0 = static_cast<int>(chunk_extent[0]);
-        const auto extent1 = static_cast<int>(chunk_extent[1]);
-#if defined(WARPX_DIM_3D)
-        const auto extent2 = static_cast<int>(chunk_extent[2]);
-#endif
-
-        const auto chunk_offset0 = offset0 + (chunk_offset[0] - 1) * file_dx;
-        const auto chunk_offset1 = offset1 + (chunk_offset[1] - 1) * file_dy;
-#if defined(WARPX_DIM_3D)
-        const auto chunk_offset2 = offset2 + (chunk_offset[2] - 1) * file_dz;
-#endif
-        
-/*
-        amrex::Print() << "chunk_offset: " << chunk_offset[0] << ", " << chunk_offset[1] << ", " << chunk_offset[2] << "\n";
-        amrex::Print() << "chunk_extent: " << chunk_extent[0] << ", " << chunk_extent[1] << ", " << chunk_extent[2] << "\n";
-        amrex::Print() << "extent0: " << extent0 << ", extent1: " << extent1 << ", extent2: " << extent2 << "\n";
-*/
-        // Load the necessary chunk of data
-        auto FC_chunk_data = FC.loadChunk<double>(chunk_offset, chunk_extent);
-        series.flush();
-        auto *FC_data_host = FC_chunk_data.get();
-
-        // Load data to GPU
-        const size_t total_extent = size_t(chunk_extent[0]) * chunk_extent[1] * chunk_extent[2];
-        amrex::Gpu::DeviceVector<double> FC_data_gpu(total_extent);
-        auto *FC_data = FC_data_gpu.data();
-        amrex::Gpu::copy(amrex::Gpu::hostToDevice, FC_data_host, FC_data_host + total_extent, FC_data);
 
         // Start ParallelFor
         amrex::ParallelFor (tb,
@@ -1718,12 +1616,12 @@ WarpX::ReadExternalFieldFromFile (
 
 #if defined(WARPX_DIM_RZ)
                 // Get index of the external field array
-                int const ir = std::floor( (x0-chunk_offset0)/file_dr );
-                int const iz = std::floor( (x1-chunk_offset1)/file_dz );
+                int const ir = std::floor( (x0-offset0)/file_dr );
+                int const iz = std::floor( (x1-offset1)/file_dz );
 
                 // Get coordinates of external grid point
-                amrex::Real const xx0 = chunk_offset0 + ir * file_dr;
-                amrex::Real const xx1 = chunk_offset1 + iz * file_dz;
+                amrex::Real const xx0 = offset0 + ir * file_dr;
+                amrex::Real const xx1 = offset1 + iz * file_dz;
 
 #elif defined(WARPX_DIM_3D)
                 amrex::Real x2;
@@ -1732,14 +1630,14 @@ WarpX::ReadExternalFieldFromFile (
                 else { x2 = real_box.lo(2) + k*dx[2] + 0.5_rt*dx[2]; }
 
                 // Get index of the external field array
-                int const ix = std::floor( (x0-chunk_offset0)/file_dx );
-                int const iy = std::floor( (x1-chunk_offset1)/file_dy );
-                int const iz = std::floor( (x2-chunk_offset2)/file_dz );
+                int const ix = std::floor( (x0-offset0)/file_dx );
+                int const iy = std::floor( (x1-offset1)/file_dy );
+                int const iz = std::floor( (x2-offset2)/file_dz );
 
                 // Get coordinates of external grid point
-                amrex::Real const xx0 = chunk_offset0 + ix * file_dx;
-                amrex::Real const xx1 = chunk_offset1 + iy * file_dy;
-                amrex::Real const xx2 = chunk_offset2 + iz * file_dz;
+                amrex::Real const xx0 = offset0 + ix * file_dx;
+                amrex::Real const xx1 = offset1 + iy * file_dy;
+                amrex::Real const xx2 = offset2 + iz * file_dz;
 #endif
 
 #if defined(WARPX_DIM_RZ)
@@ -1776,7 +1674,7 @@ WarpX::ReadExternalFieldFromFile (
 
     } // End loop over boxes.
 
-} // End function WarpX::ReadExternalFieldFromFile
+} // End function WarpX::ReadExternalFieldFromFile¨
 #else // WARPX_USE_OPENPMD && !WARPX_DIM_1D_Z && !defined(WARPX_DIM_XZ)
 void
 WarpX::ReadExternalFieldFromFile (const std::string& , amrex::MultiFab* , const std::string& , const std::string& )
