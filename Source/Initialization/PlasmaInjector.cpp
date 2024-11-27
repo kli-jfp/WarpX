@@ -458,10 +458,10 @@ void PlasmaInjector::setupExternalFile (amrex::ParmParse const& pp_species)
     const bool mass_is_specified = pp_species.contains("mass");
     const bool species_is_specified = pp_species.contains("species_type");
 
-    if (amrex::ParallelDescriptor::IOProcessor()) {
-        m_openpmd_input_series = std::make_unique<openPMD::Series>(
+    m_openpmd_input_series = std::make_unique<openPMD::Series>(
             str_injection_file, openPMD::Access::READ_ONLY);
 
+    if (amrex::ParallelDescriptor::IOProcessor()) {
         WARPX_ALWAYS_ASSERT_WITH_MESSAGE(
             m_openpmd_input_series->iterations.size() == 1u,
             "External file should contain only 1 iteration\n");

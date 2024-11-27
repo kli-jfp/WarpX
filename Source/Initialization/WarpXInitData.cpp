@@ -1499,7 +1499,7 @@ WarpX::LoadExternalFields (int const lev)
 }
 #if defined(WARPX_USE_OPENPMD) && !defined(WARPX_DIM_1D_Z) && !defined(WARPX_DIM_XZ)
 void
-WarpX::ReadExternalFieldFromFile (
+WarpX::ReadExternalFieldFromFileOld (
        const std::string& read_fields_from_path, amrex::MultiFab* mf,
        const std::string& F_name, const std::string& F_component)
 {
@@ -1675,6 +1675,299 @@ WarpX::ReadExternalFieldFromFile (
     } // End loop over boxes.
 
 } // End function WarpX::ReadExternalFieldFromFile¨
+#else // WARPX_USE_OPENPMD && !WARPX_DIM_1D_Z && !defined(WARPX_DIM_XZ)
+void
+WarpX::ReadExternalFieldFromFileOld (const std::string& , amrex::MultiFab* , const std::string& , const std::string& )
+{
+#if defined(WARPX_DIM_1D_Z)
+    WARPX_ABORT_WITH_MESSAGE("Reading fields from openPMD files is not supported in 1D");
+#elif defined(WARPX_DIM_XZ)
+    WARPX_ABORT_WITH_MESSAGE("Reading from openPMD for external fields is not known to work with XZ (see #3828)");
+#elif !defined(WARPX_USE_OPENPMD)
+    WARPX_ABORT_WITH_MESSAGE("OpenPMD field reading requires OpenPMD support to be enabled");
+#endif
+}
+#endif // WARPX_USE_OPENPMD
+
+
+#if defined(WARPX_USE_OPENPMD) && !defined(WARPX_DIM_1D_Z) && !defined(WARPX_DIM_XZ)
+void
+WarpX::ReadExternalFieldFromFile (
+       const std::string& read_fields_from_path, amrex::MultiFab* mf,
+       const std::string& F_name, const std::string& F_component)
+{
+    // Get WarpX domain info
+    auto& warpx = WarpX::GetInstance();
+    amrex::Geometry const& geom0 = warpx.Geom(0);
+    const amrex::RealBox& real_box = geom0.ProbDomain();
+    const auto dx = geom0.CellSizeArray();
+    const amrex::IntVect nodal_flag = mf->ixType().toIntVect();
+
+    // Get the global domain minimum boundaries
+    const amrex::Real* global_domain_min = geom0.ProbLo();
+    const amrex::Real* global_domain_max = geom0.ProbHi();
+
+    const amrex::Box& global_box = geom0.Domain();
+
+    // Read external field openPMD data
+    auto series = openPMD::Series(read_fields_from_path, openPMD::Access::READ_ONLY);
+    auto iseries = series.iterations.begin()->second;
+    auto F = iseries.meshes[F_name];
+
+    WARPX_ALWAYS_ASSERT_WITH_MESSAGE(F.getAttribute("dataOrder").get<std::string>() == "C",
+                                     "Reading from files with non-C dataOrder is not implemented");
+
+    auto axisLabels = F.getAttribute("axisLabels").get<std::vector<std::string>>();
+    auto fileGeom = F.getAttribute("geometry").get<std::string>();
+
+#if defined(WARPX_DIM_3D)
+    WARPX_ALWAYS_ASSERT_WITH_MESSAGE(fileGeom == "cartesian", "3D can only read from files with cartesian geometry");
+    WARPX_ALWAYS_ASSERT_WITH_MESSAGE(axisLabels[0] == "x" && axisLabels[1] == "y" && axisLabels[2] == "z",
+                                     "3D expects axisLabels {x, y, z}");
+#elif defined(WARPX_DIM_XZ)
+    WARPX_ALWAYS_ASSERT_WITH_MESSAGE(fileGeom == "cartesian", "XZ can only read from files with cartesian geometry");
+    WARPX_ALWAYS_ASSERT_WITH_MESSAGE(axisLabels[0] == "x" && axisLabels[1] == "z",
+                                     "XZ expects axisLabels {x, z}");
+#elif defined(WARPX_DIM_1D_Z)
+    WARPX_ABORT_WITH_MESSAGE(
+        "Reading from openPMD for external fields is not known to work with 1D3V (see #3830)");
+    WARPX_ALWAYS_ASSERT_WITH_MESSAGE(fileGeom == "cartesian", "1D3V can only read from files with cartesian geometry");
+    WARPX_ALWAYS_ASSERT_WITH_MESSAGE(axisLabels[0] == "z");
+#elif defined(WARPX_DIM_RZ)
+    WARPX_ALWAYS_ASSERT_WITH_MESSAGE(fileGeom == "thetaMode", "RZ can only read from files with 'thetaMode'  geometry");
+    WARPX_ALWAYS_ASSERT_WITH_MESSAGE(axisLabels[0] == "r" && axisLabels[1] == "z",
+                                     "RZ expects axisLabels {r, z}");
+#endif
+
+    const auto offset = F.gridGlobalOffset();
+    const auto offset0 = static_cast<amrex::Real>(offset[0]);
+    const auto offset1 = static_cast<amrex::Real>(offset[1]);
+#if defined(WARPX_DIM_3D)
+    const auto offset2 = static_cast<amrex::Real>(offset[2]);
+#endif
+    const auto d = F.gridSpacing<long double>();
+
+#if defined(WARPX_DIM_RZ)
+    const auto file_dr = static_cast<amrex::Real>(d[0]);
+    const auto file_dz = static_cast<amrex::Real>(d[1]);
+#elif defined(WARPX_DIM_3D)
+    const auto file_dx = static_cast<amrex::Real>(d[0]);
+    const auto file_dy = static_cast<amrex::Real>(d[1]);
+    const auto file_dz = static_cast<amrex::Real>(d[2]);
+#endif
+
+    auto FC = F[F_component];
+    const auto extent = FC.getExtent();
+/*
+    // Calculate the lower and upper bounds of the domain of the FC
+    amrex::Real lower_bound_x = offset0;
+    amrex::Real upper_bound_x = offset0 + extent[0] * static_cast<amrex::Real>(d[0]);
+    amrex::Real lower_bound_y = offset1;
+    amrex::Real upper_bound_y = offset1 + extent[1] * static_cast<amrex::Real>(d[1]);
+#if defined(WARPX_DIM_3D)
+    amrex::Real lower_bound_z = offset2;
+    amrex::Real upper_bound_z = offset2 + extent[2] * static_cast<amrex::Real>(d[2]);
+#endif
+
+    amrex::Print() << "Lower bounds: (" << lower_bound_x << ", " << lower_bound_y
+#if defined(WARPX_DIM_3D)
+               << ", " << lower_bound_z
+#endif
+               << ")\n";
+    amrex::Print() << "Upper bounds: (" << upper_bound_x << ", " << upper_bound_y
+#if defined(WARPX_DIM_3D)
+               << ", " << upper_bound_z
+#endif
+               << ")\n";
+*/
+
+    // Loop over boxes
+    for (MFIter mfi(*mf, TilingIfNotGPU()); mfi.isValid(); ++mfi) {
+        const amrex::Box& local_box = mfi.validbox();
+        const amrex::Box box = mfi.growntilebox();
+        const amrex::Box tb = mfi.tilebox(nodal_flag, mf->nGrowVect());
+        auto const& mffab = mf->array(mfi);
+
+        // Calculate the lower and upper bounds of the local box
+        amrex::Real local_box_lo[3], local_box_hi[3];
+        for (int idim = 0; idim < AMREX_SPACEDIM; ++idim) {
+            local_box_lo[idim] = global_domain_min[idim] + local_box.smallEnd(idim) * dx[idim];
+            local_box_hi[idim] = global_domain_min[idim] + (local_box.bigEnd(idim) + 1) * dx[idim];
+        }
+/*
+        amrex::Print() << "local_box_lo: (" << local_box_lo[0] << ", " << local_box_lo[1]
+#if defined(WARPX_DIM_3D)
+                   << ", " << local_box_lo[2]
+#endif
+                   << ")\n";
+        amrex::Print() << "local_box_hi: (" << local_box_hi[0] << ", " << local_box_hi[1]
+#if defined(WARPX_DIM_3D)
+                   << ", " << local_box_hi[2]
+#endif
+                   << ")\n";
+*/
+
+        // Define the grid for the external field data
+        std::vector<amrex::Real> grid_x(extent[0]);
+        std::vector<amrex::Real> grid_y(extent[1]);
+#if defined(WARPX_DIM_3D)
+        std::vector<amrex::Real> grid_z(extent[2]);
+#endif
+
+        for (size_t idx = 0; idx < extent[0]; ++idx) {
+            grid_x[idx] = offset0 + idx * file_dx;
+        }
+        for (size_t idy = 0; idy < extent[1]; ++idy) {
+            grid_y[idy] = offset1 + idy * file_dy;
+        }
+#if defined(WARPX_DIM_3D)
+        for (size_t idz = 0; idz < extent[2]; ++idz) {
+            grid_z[idz] = offset2 + idz * file_dz;
+        }
+#endif
+
+        // Find the start and end indices for the local box in the external field data
+        auto start_x = std::lower_bound(grid_x.begin(), grid_x.end(), local_box_lo[0]) - 1;
+        auto end_x = std::upper_bound(grid_x.begin(), grid_x.end(), local_box_hi[0]) + 1;
+        auto start_y = std::lower_bound(grid_y.begin(), grid_y.end(), local_box_lo[1]) - 1;
+        auto end_y = std::upper_bound(grid_y.begin(), grid_y.end(), local_box_hi[1]) + 1;
+#if defined(WARPX_DIM_3D)
+        auto start_z = std::lower_bound(grid_z.begin(), grid_z.end(), local_box_lo[2]) - 1;
+        auto end_z = std::upper_bound(grid_z.begin(), grid_z.end(), local_box_hi[2]) + 1;
+#endif
+
+        // Calculate chunk offset and extent based on the current box
+        openPMD::Offset chunk_offset = {
+            static_cast<std::uint64_t>(std::distance(grid_x.begin(), start_x)),
+            static_cast<std::uint64_t>(std::distance(grid_y.begin(), start_y)),
+#if defined(WARPX_DIM_3D)
+            static_cast<std::uint64_t>(std::distance(grid_z.begin(), start_z))
+#endif
+        };
+        openPMD::Extent chunk_extent = {
+            static_cast<std::uint64_t>(std::distance(start_x, end_x)),
+            static_cast<std::uint64_t>(std::distance(start_y, end_y)),
+#if defined(WARPX_DIM_3D)
+            static_cast<std::uint64_t>(std::distance(start_z, end_z))
+#endif
+        };
+
+        const auto extent0 = static_cast<int>(chunk_extent[0]);
+        const auto extent1 = static_cast<int>(chunk_extent[1]);
+#if defined(WARPX_DIM_3D)
+        const auto extent2 = static_cast<int>(chunk_extent[2]);
+#endif
+
+        const auto chunk_offset0 = offset0 + chunk_offset[0] * file_dx;
+        const auto chunk_offset1 = offset1 + chunk_offset[1] * file_dy;
+#if defined(WARPX_DIM_3D)
+        const auto chunk_offset2 = offset2 + chunk_offset[2] * file_dz;
+#endif
+        
+/*
+        amrex::Print() << "chunk_offset: " << chunk_offset[0] << ", " << chunk_offset[1] << ", " << chunk_offset[2] << "\n";
+        amrex::Print() << "chunk_extent: " << chunk_extent[0] << ", " << chunk_extent[1] << ", " << chunk_extent[2] << "\n";
+        amrex::Print() << "extent0: " << extent0 << ", extent1: " << extent1 << ", extent2: " << extent2 << "\n";
+*/
+        // Load the necessary chunk of data
+        auto FC_chunk_data = FC.loadChunk<double>(chunk_offset, chunk_extent);
+        series.flush();
+        auto *FC_data_host = FC_chunk_data.get();
+
+        // Load data to GPU
+        const size_t total_extent = size_t(chunk_extent[0]) * chunk_extent[1] * chunk_extent[2];
+        amrex::Gpu::DeviceVector<double> FC_data_gpu(total_extent);
+        auto *FC_data = FC_data_gpu.data();
+        amrex::Gpu::copy(amrex::Gpu::hostToDevice, FC_data_host, FC_data_host + total_extent, FC_data);
+
+        // Start ParallelFor
+        amrex::ParallelFor (tb,
+            [=] AMREX_GPU_DEVICE (int i, int j, int k) {
+                // i,j,k denote x,y,z indices in 3D xyz.
+                // i,j denote r,z indices in 2D rz; k is just 0
+
+                // ii is used for 2D RZ mode
+#if defined(WARPX_DIM_RZ)
+                // In 2D RZ, i denoting r can be < 0
+                // but mirrored values should be assigned.
+                // Namely, mffab(i) = FC_data[-i] when i<0.
+                const int ii = (i<0)?(-i):(i);
+#else
+                const int ii = i;
+#endif
+
+                // Physical coordinates of the grid point
+                // 0,1,2 denote x,y,z in 3D xyz.
+                // 0,1 denote r,z in 2D rz.
+                amrex::Real x0, x1;
+                if ( box.type(0)==amrex::IndexType::CellIndex::NODE )
+                     { x0 = static_cast<amrex::Real>(real_box.lo(0)) + ii*dx[0]; }
+                else { x0 = static_cast<amrex::Real>(real_box.lo(0)) + ii*dx[0] + 0.5_rt*dx[0]; }
+                if ( box.type(1)==amrex::IndexType::CellIndex::NODE )
+                     { x1 = real_box.lo(1) + j*dx[1]; }
+                else { x1 = real_box.lo(1) + j*dx[1] + 0.5_rt*dx[1]; }
+
+#if defined(WARPX_DIM_RZ)
+                // Get index of the external field array
+                int const ir = std::floor( (x0-chunk_offset0)/file_dr );
+                int const iz = std::floor( (x1-chunk_offset1)/file_dz );
+
+                // Get coordinates of external grid point
+                amrex::Real const xx0 = chunk_offset0 + ir * file_dr;
+                amrex::Real const xx1 = chunk_offset1 + iz * file_dz;
+
+#elif defined(WARPX_DIM_3D)
+                amrex::Real x2;
+                if ( box.type(2)==amrex::IndexType::CellIndex::NODE )
+                     { x2 = real_box.lo(2) + k*dx[2]; }
+                else { x2 = real_box.lo(2) + k*dx[2] + 0.5_rt*dx[2]; }
+
+                // Get index of the external field array
+                int const ix = std::floor( (x0-chunk_offset0)/file_dx );
+                int const iy = std::floor( (x1-chunk_offset1)/file_dy );
+                int const iz = std::floor( (x2-chunk_offset2)/file_dz );
+
+                // Get coordinates of external grid point
+                amrex::Real const xx0 = chunk_offset0 + ix * file_dx;
+                amrex::Real const xx1 = chunk_offset1 + iy * file_dy;
+                amrex::Real const xx2 = chunk_offset2 + iz * file_dz;
+#endif
+
+#if defined(WARPX_DIM_RZ)
+                const amrex::Array4<double> fc_array(FC_data, {0,0,0}, {extent0, extent2, extent1}, 1);
+                const double
+                    f00 = fc_array(0, iz  , ir  ),
+                    f01 = fc_array(0, iz  , ir+1),
+                    f10 = fc_array(0, iz+1, ir  ),
+                    f11 = fc_array(0, iz+1, ir+1);
+                mffab(i,j,k) = static_cast<amrex::Real>(utils::algorithms::bilinear_interp<double>
+                    (xx0, xx0+file_dr, xx1, xx1+file_dz,
+                     f00, f01, f10, f11,
+                     x0, x1));
+#elif defined(WARPX_DIM_3D)
+                const amrex::Array4<double> fc_array(FC_data, {0,0,0}, {extent2, extent1, extent0}, 1);
+                const double
+                    f000 = fc_array(iz  , iy  , ix  ),
+                    f001 = fc_array(iz+1, iy  , ix  ),
+                    f010 = fc_array(iz  , iy+1, ix  ),
+                    f011 = fc_array(iz+1, iy+1, ix  ),
+                    f100 = fc_array(iz  , iy  , ix+1),
+                    f101 = fc_array(iz+1, iy  , ix+1),
+                    f110 = fc_array(iz  , iy+1, ix+1),
+                    f111 = fc_array(iz+1, iy+1, ix+1);
+                mffab(i,j,k) = static_cast<amrex::Real>(utils::algorithms::trilinear_interp<double>
+                    (xx0, xx0+file_dx, xx1, xx1+file_dy, xx2, xx2+file_dz,
+                     f000, f001, f010, f011, f100, f101, f110, f111,
+                     x0, x1, x2));
+#endif
+
+            }
+
+        ); // End ParallelFor
+
+    } // End loop over boxes.
+
+} // End function WarpX::ReadExternalFieldFromFile
 #else // WARPX_USE_OPENPMD && !WARPX_DIM_1D_Z && !defined(WARPX_DIM_XZ)
 void
 WarpX::ReadExternalFieldFromFile (const std::string& , amrex::MultiFab* , const std::string& , const std::string& )

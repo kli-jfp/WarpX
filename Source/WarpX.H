@@ -952,10 +952,12 @@ public:
      * \brief Load field values from a user-specified openPMD file
      * for a specific field (specified by `F_name`)
      */
+    void ReadExternalFieldFromFileOld (
+         const std::string& read_fields_from_path, amrex::MultiFab* mf,
+         const std::string& F_name, const std::string& F_component);
     void ReadExternalFieldFromFile (
          const std::string& read_fields_from_path, amrex::MultiFab* mf,
          const std::string& F_name, const std::string& F_component);
-
     /**
      * \brief
      * This function initializes and calculates grid quantities used along with
