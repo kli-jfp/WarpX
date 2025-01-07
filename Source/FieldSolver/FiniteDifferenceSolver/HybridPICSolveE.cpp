@@ -732,6 +732,18 @@ void FiniteDifferenceSolver::HybridPICSolveECartesian (
 
     auto const& warpx = WarpX::GetInstance();
     ablastr::fields::ConstVectorField Bfield_external = warpx.m_fields.get_alldirs(FieldType::hybrid_bfield_fp_external, 0); // lev=0
+    ablastr::fields::ConstMultiLevelScalarField distance_to_eb_field = warpx.m_fields.get_mr_levels(FieldType::distance_to_eb, 0); // lev=0
+    // Access the MultiFab for level 0
+    const amrex::MultiFab& distance_to_eb_mf = *distance_to_eb_field[0];
+
+    const amrex::Geometry& geom = warpx.Geom(0);
+    const auto& dx = geom.CellSizeArray();
+
+    // Determine the minimum cell size
+    amrex::Real min_grid_distance = std::min({dx[0], dx[1], dx[2]});
+
+    // Calculate 1.5 times the smallest grid cell size
+    amrex::Real threshold_distance = 1.5 * min_grid_distance;
 
     // Index type required for interpolating fields from their respective
     // staggering to the Ex, Ey, Ez locations
@@ -859,6 +871,10 @@ void FiniteDifferenceSolver::HybridPICSolveECartesian (
         Array4<Real const> const& rho = rhofield.const_array(mfi);
         Array4<Real const> const& Pe = Pefield.array(mfi);
 
+        // Extract distance_to_eb data for this grid/tile
+        Array4<Real const> const& distance_to_eb = distance_to_eb_mf.const_array(mfi);
+        
+
         amrex::Array4<amrex::Real> lx, ly, lz;
         if (EB::enabled()) {
             lx = edge_lengths[0]->array(mfi);
@@ -916,7 +932,11 @@ void FiniteDifferenceSolver::HybridPICSolveECartesian (
 
                 if (include_hyper_resistivity_term) {
                     auto nabla2Jx = T_Algo::DxxFourthOrder(Jx, coefs_x, n_coefs_x, i, j, k);
-                    Ex(i, j, k) -= eta_h * nabla2Jx;
+                    if (std::abs(distance_to_eb(i, j, k)) < threshold_distance) {
+                        Ex(i, j, k) -= 2 * eta_h * nabla2Jx;
+                    } else {
+                        Ex(i, j, k) -= eta_h * nabla2Jx;
+                    }
                 }
             },
 
@@ -960,7 +980,11 @@ void FiniteDifferenceSolver::HybridPICSolveECartesian (
 
                 if (include_hyper_resistivity_term) {
                     auto nabla2Jy = T_Algo::DyyFourthOrder(Jy, coefs_y, n_coefs_y, i, j, k);
-                    Ey(i, j, k) -= eta_h * nabla2Jy;
+                    if (std::abs(distance_to_eb(i, j, k)) < threshold_distance) {
+                        Ey(i, j, k) -= 2 * eta_h * nabla2Jy;
+                    } else {
+                        Ey(i, j, k) -= eta_h * nabla2Jy;
+                    }
                 }
             },
 
@@ -1000,7 +1024,11 @@ void FiniteDifferenceSolver::HybridPICSolveECartesian (
 
                 if (include_hyper_resistivity_term) {
                     auto nabla2Jz = T_Algo::DzzFourthOrder(Jz, coefs_z, n_coefs_z, i, j, k);
-                    Ez(i, j, k) -= eta_h * nabla2Jz;
+                    if (std::abs(distance_to_eb(i, j, k)) < threshold_distance) {
+                        Ez(i, j, k) -= 2 * eta_h * nabla2Jz;
+                    } else {
+                        Ez(i, j, k) -= eta_h * nabla2Jz;
+                    }
                 }
             }
         );

@@ -1499,7 +1499,7 @@ WarpX::LoadExternalFields (int const lev)
 }
 #if defined(WARPX_USE_OPENPMD) && !defined(WARPX_DIM_1D_Z) && !defined(WARPX_DIM_XZ)
 void
-WarpX::ReadExternalFieldFromFileOld (
+WarpX::ReadExternalFieldFromFile (
        const std::string& read_fields_from_path, amrex::MultiFab* mf,
        const std::string& F_name, const std::string& F_component)
 {
@@ -1677,7 +1677,7 @@ WarpX::ReadExternalFieldFromFileOld (
 } // End function WarpX::ReadExternalFieldFromFile¨
 #else // WARPX_USE_OPENPMD && !WARPX_DIM_1D_Z && !defined(WARPX_DIM_XZ)
 void
-WarpX::ReadExternalFieldFromFileOld (const std::string& , amrex::MultiFab* , const std::string& , const std::string& )
+WarpX::ReadExternalFieldFromFile (const std::string& , amrex::MultiFab* , const std::string& , const std::string& )
 {
 #if defined(WARPX_DIM_1D_Z)
     WARPX_ABORT_WITH_MESSAGE("Reading fields from openPMD files is not supported in 1D");
@@ -1692,7 +1692,7 @@ WarpX::ReadExternalFieldFromFileOld (const std::string& , amrex::MultiFab* , con
 
 #if defined(WARPX_USE_OPENPMD) && !defined(WARPX_DIM_1D_Z) && !defined(WARPX_DIM_XZ)
 void
-WarpX::ReadExternalFieldFromFile (
+WarpX::ReadExternalFieldFromFileOld (
        const std::string& read_fields_from_path, amrex::MultiFab* mf,
        const std::string& F_name, const std::string& F_component)
 {
@@ -1970,7 +1970,7 @@ WarpX::ReadExternalFieldFromFile (
 } // End function WarpX::ReadExternalFieldFromFile
 #else // WARPX_USE_OPENPMD && !WARPX_DIM_1D_Z && !defined(WARPX_DIM_XZ)
 void
-WarpX::ReadExternalFieldFromFile (const std::string& , amrex::MultiFab* , const std::string& , const std::string& )
+WarpX::ReadExternalFieldFromFileOld (const std::string& , amrex::MultiFab* , const std::string& , const std::string& )
 {
 #if defined(WARPX_DIM_1D_Z)
     WARPX_ABORT_WITH_MESSAGE("Reading fields from openPMD files is not supported in 1D");

@@ -294,9 +294,14 @@ void HybridPICModel::InitData ()
                 lev, PatchType::fine
             );
         } else if (m_elec_temp_style == "read_from_file") {
-            ReadScalarFieldFromFile(
+            warpx.ReadExternalFieldFromFile(
                 m_elec_temp_field_path,
-                *electron_temperature_fp);
+                electron_temperature_fp,
+                "temperature", "value"
+            );
+            // ReadScalarFieldFromFile(
+            //     m_elec_temp_field_path,
+            //     *electron_temperature_fp);
         }
 
         if (m_J_ext_grid_style == "parse_j_ext_grid_function") {
