@@ -2533,13 +2533,7 @@ PhysicalParticleContainer::ContinuousInjection (const RealBox& injection_box)
     // Inject plasma on level 0. Particles will be redistributed.
     const int lev=0;
     for (auto const& plasma_injector : plasma_injectors) {
-        if (plasma_injector->external_file) {
-            AddPlasmaFromFile(*plasma_injector,
-                              plasma_injector->q_tot,
-                              plasma_injector->z_shift);
-        } else {
-            AddPlasma(*plasma_injector, lev, injection_box);
-        }
+        AddPlasma(*plasma_injector, lev, injection_box);
     }
 }
 
