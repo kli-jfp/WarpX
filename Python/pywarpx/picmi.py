@@ -1805,15 +1805,21 @@ class HybridPICSolver(picmistandard.base._ClassWithInit):
         self,
         grid,
         Te=None,
+        Te_init_style=None,
+        Te_file_path=None,
         n0=None,
         gamma=None,
         n_floor=None,
         plasma_resistivity=None,
         plasma_hyper_resistivity=None,
         substeps=None,
+        J_init_style=None,
+        J_file_path=None,
         Jx_external_function=None,
         Jy_external_function=None,
         Jz_external_function=None,
+        B_init_style=None,
+        B_file_path=None,
         Bx_external_function=None,
         By_external_function=None,
         Bz_external_function=None,
@@ -1823,6 +1829,8 @@ class HybridPICSolver(picmistandard.base._ClassWithInit):
         self.method = "hybrid"
 
         self.Te = Te
+        self.Te_init_style = Te_init_style
+        self.Te_file_path = Te_file_path
         self.n0 = n0
         self.gamma = gamma
         self.n_floor = n_floor
@@ -1831,10 +1839,14 @@ class HybridPICSolver(picmistandard.base._ClassWithInit):
 
         self.substeps = substeps
 
+        self.J_init_style = J_init_style
+        self.J_file_path = J_file_path
         self.Jx_external_function = Jx_external_function
         self.Jy_external_function = Jy_external_function
         self.Jz_external_function = Jz_external_function
 
+        self.B_init_style = B_init_style
+        self.B_file_path = B_file_path
         self.Bx_external_function = Bx_external_function
         self.By_external_function = By_external_function
         self.Bz_external_function = Bz_external_function
@@ -1857,7 +1869,14 @@ class HybridPICSolver(picmistandard.base._ClassWithInit):
 
         pywarpx.algo.maxwell_solver = self.method
 
-        pywarpx.hybridpicmodel.elec_temp = self.Te
+        pywarpx.hybridpicmodel.__setattr__(
+            "elec_temp(x,y,z)",
+            pywarpx.my_constants.mangle_expression(
+                self.Te, self.mangle_dict
+            ),
+        )
+        pywarpx.hybridpicmodel.electron_temperature_init_style = self.Te_init_style
+        pywarpx.hybridpicmodel.read_Te_field_from_path = self.Te_file_path
         pywarpx.hybridpicmodel.n0_ref = self.n0
         pywarpx.hybridpicmodel.gamma = self.gamma
         pywarpx.hybridpicmodel.n_floor = self.n_floor
@@ -1869,6 +1888,8 @@ class HybridPICSolver(picmistandard.base._ClassWithInit):
         )
         pywarpx.hybridpicmodel.plasma_hyper_resistivity = self.plasma_hyper_resistivity
         pywarpx.hybridpicmodel.substeps = self.substeps
+        pywarpx.hybridpicmodel.J_external_init_style = self.J_init_style
+        pywarpx.hybridpicmodel.read_j_fields_from_path = self.J_file_path
         pywarpx.hybridpicmodel.__setattr__(
             "Jx_external_grid_function(x,y,z,t)",
             pywarpx.my_constants.mangle_expression(
@@ -1887,7 +1908,8 @@ class HybridPICSolver(picmistandard.base._ClassWithInit):
                 self.Jz_external_function, self.mangle_dict
             ),
         )
-
+        pywarpx.hybridpicmodel.B_external_init_style = self.B_init_style
+        pywarpx.hybridpicmodel.read_b_fields_from_path = self.B_file_path
         pywarpx.hybridpicmodel.__setattr__(
             "Bx_external_grid_function(x,y,z,t)",
             pywarpx.my_constants.mangle_expression(

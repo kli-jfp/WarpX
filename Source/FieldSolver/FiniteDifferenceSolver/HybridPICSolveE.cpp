@@ -901,6 +901,8 @@ void FiniteDifferenceSolver::HybridPICSolveECartesian (
             [=] AMREX_GPU_DEVICE (int i, int j, int k){
                 // Skip if this cell is fully covered by embedded boundaries
                 if (lx && lx(i, j, k) <= 0) { return; }
+                //     Ex(i,j,k) = 0.0;
+                // }
 
                 // Interpolate to get the appropriate charge density in space
                 Real rho_val = Interp(rho, nodal, Ex_stag, coarsen, i, j, k, 0);
@@ -932,11 +934,7 @@ void FiniteDifferenceSolver::HybridPICSolveECartesian (
 
                 if (include_hyper_resistivity_term) {
                     auto nabla2Jx = T_Algo::DxxFourthOrder(Jx, coefs_x, n_coefs_x, i, j, k);
-                    if (std::abs(distance_to_eb(i, j, k)) < threshold_distance) {
-                        Ex(i, j, k) -= 2 * eta_h * nabla2Jx;
-                    } else {
-                        Ex(i, j, k) -= eta_h * nabla2Jx;
-                    }
+                    Ex(i, j, k) -= eta_h * nabla2Jx;
                 }
             },
 
@@ -945,6 +943,8 @@ void FiniteDifferenceSolver::HybridPICSolveECartesian (
                 // Skip field solve if this cell is fully covered by embedded boundaries
 #ifdef WARPX_DIM_3D
                 if (ly && ly(i,j,k) <= 0) { return; }
+                //     Ey(i,j,k) = 0.0;
+                // }
 #elif defined(WARPX_DIM_XZ)
                 //In XZ Ey is associated with a mesh node, so we need to check if the mesh node is covered
                 amrex::ignore_unused(ly);
@@ -980,19 +980,18 @@ void FiniteDifferenceSolver::HybridPICSolveECartesian (
 
                 if (include_hyper_resistivity_term) {
                     auto nabla2Jy = T_Algo::DyyFourthOrder(Jy, coefs_y, n_coefs_y, i, j, k);
-                    if (std::abs(distance_to_eb(i, j, k)) < threshold_distance) {
-                        Ey(i, j, k) -= 2 * eta_h * nabla2Jy;
-                    } else {
-                        Ey(i, j, k) -= eta_h * nabla2Jy;
-                    }
+                    Ey(i, j, k) -= eta_h * nabla2Jy;
                 }
             },
+                
 
             // Ez calculation
             [=] AMREX_GPU_DEVICE (int i, int j, int k){
 #ifdef AMREX_USE_EB
                 // Skip field solve if this cell is fully covered by embedded boundaries
                 if (lz && lz(i,j,k) <= 0) { return; }
+                //     Ez(i,j,k) = 0.0;
+                // }
 #endif
                 // Interpolate to get the appropriate charge density in space
                 Real rho_val = Interp(rho, nodal, Ez_stag, coarsen, i, j, k, 0);
@@ -1024,14 +1023,97 @@ void FiniteDifferenceSolver::HybridPICSolveECartesian (
 
                 if (include_hyper_resistivity_term) {
                     auto nabla2Jz = T_Algo::DzzFourthOrder(Jz, coefs_z, n_coefs_z, i, j, k);
-                    if (std::abs(distance_to_eb(i, j, k)) < threshold_distance) {
-                        Ez(i, j, k) -= 2 * eta_h * nabla2Jz;
-                    } else {
-                        Ez(i, j, k) -= eta_h * nabla2Jz;
+                    Ez(i, j, k) -= eta_h * nabla2Jz;
+                }
+            }
+        );
+        if (cost && WarpX::load_balance_costs_update_algo == LoadBalanceCostsUpdateAlgo::Timers)
+        {
+            amrex::Gpu::synchronize();
+            wt = static_cast<amrex::Real>(amrex::second()) - wt;
+            amrex::HostDevice::Atomic::Add( &(*cost)[mfi.index()], wt);
+        }
+                
+        /*
+        // Loop over the cells and update the E field
+        amrex::ParallelFor(tex, tey, tez,
+            [=] AMREX_GPU_DEVICE (int i, int j, int k){
+                if (std::abs(distance_to_eb(i, j, k)) < threshold_distance) {
+                    if (lx && lx(i,j,k) <= 0) { 
+                        amrex::Real gaussian_Ex = 0.0;
+                        amrex::Real weights[3][3][3] = {
+                            {{1, 2, 1}, {2, 4, 2}, {1, 2, 1}},
+                            {{2, 4, 2}, {4, 8, 4}, {2, 4, 2}},
+                            {{1, 2, 1}, {2, 4, 2}, {1, 2, 1}}
+                        };
+                        amrex::Real sum_weights = 0.0;
+
+                        for (int ii = -1; ii <= 1; ++ii) {
+                            for (int jj = -1; jj <= 1; ++jj) {
+                                for (int kk = -1; kk <= 1; ++kk) {
+                                    gaussian_Ex += weights[ii + 1][jj + 1][kk + 1] * Ex(i + ii, j + jj, k + kk);
+                                    sum_weights += weights[ii + 1][jj + 1][kk + 1];
+                                }
+                            }
+                        }
+
+                        gaussian_Ex /= sum_weights;
+                        Ex(i, j, k) = gaussian_Ex;
+                    }
+                }
+            },
+            [=] AMREX_GPU_DEVICE (int i, int j, int k){
+                if (std::abs(distance_to_eb(i, j, k)) < threshold_distance) {
+                    if (ly && ly(i,j,k) <= 0) { 
+                        amrex::Real gaussian_Ey = 0.0;
+                        amrex::Real weights[3][3][3] = {
+                            {{1, 2, 1}, {2, 4, 2}, {1, 2, 1}},
+                            {{2, 4, 2}, {4, 8, 4}, {2, 4, 2}},
+                            {{1, 2, 1}, {2, 4, 2}, {1, 2, 1}}
+                        };
+                        amrex::Real sum_weights = 0.0;
+
+                        for (int ii = -1; ii <= 1; ++ii) {
+                            for (int jj = -1; jj <= 1; ++jj) {
+                                for (int kk = -1; kk <= 1; ++kk) {
+                                    gaussian_Ey += weights[ii + 1][jj + 1][kk + 1] * Ey(i + ii, j + jj, k + kk);
+                                    sum_weights += weights[ii + 1][jj + 1][kk + 1];
+                                }
+                            }
+                        }
+
+                        gaussian_Ey /= sum_weights;
+                        Ey(i, j, k) = gaussian_Ey;
+                    }
+                }
+            },
+            [=] AMREX_GPU_DEVICE (int i, int j, int k){
+                if (std::abs(distance_to_eb(i, j, k)) < threshold_distance) {
+                    if (lz && lz(i,j,k) <= 0) { 
+                        amrex::Real gaussian_Ez = 0.0;
+                        amrex::Real weights[3][3][3] = {
+                            {{1, 2, 1}, {2, 4, 2}, {1, 2, 1}},
+                            {{2, 4, 2}, {4, 8, 4}, {2, 4, 2}},
+                            {{1, 2, 1}, {2, 4, 2}, {1, 2, 1}}
+                        };
+                        amrex::Real sum_weights = 0.0;
+
+                        for (int ii = -1; ii <= 1; ++ii) {
+                            for (int jj = -1; jj <= 1; ++jj) {
+                                for (int kk = -1; kk <= 1; ++kk) {
+                                    gaussian_Ez += weights[ii + 1][jj + 1][kk + 1] * Ez(i + ii, j + jj, k + kk);
+                                    sum_weights += weights[ii + 1][jj + 1][kk + 1];
+                                }
+                            }
+                        }
+
+                        gaussian_Ez /= sum_weights;
+                        Ez(i, j, k) = gaussian_Ez;
                     }
                 }
             }
         );
+                
 
         if (cost && WarpX::load_balance_costs_update_algo == LoadBalanceCostsUpdateAlgo::Timers)
         {
@@ -1039,6 +1121,8 @@ void FiniteDifferenceSolver::HybridPICSolveECartesian (
             wt = static_cast<amrex::Real>(amrex::second()) - wt;
             amrex::HostDevice::Atomic::Add( &(*cost)[mfi.index()], wt);
         }
+        */
+        
     }
 }
 #endif

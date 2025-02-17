@@ -35,16 +35,20 @@ void HybridPICModel::ReadParameters ()
     // and exponent to be given. These values will be used to calculate the
     // electron pressure according to p = n0 * Te * (n/n0)^gamma
     utils::parser::queryWithParser(pp_hybrid, "gamma", m_gamma);
-    if (!pp_hybrid.query("elec_temp", m_elec_temp_expression)) {
-        Abort("hybrid_pic_model.elec_temp must be specified when using the hybrid solver");
-    }
+    
     if (!pp_hybrid.query("electron_temperature_init_style", m_elec_temp_style)) {
         Abort("hybrid_pic_model.electron_temperature_init_style must be specified "
               "when using the hybrid solver");
     }
 
-    if (m_elec_temp_style == "read_from_file") {
-        pp_hybrid.get("read_Te_field_from_path", m_elec_temp_field_path);
+    if (m_elec_temp_style == "parse_Te_ext_grid_function" && !pp_hybrid.query("elec_temp(x,y,z)", m_elec_temp_expression)) {
+        Abort("hybrid_pic_model.elec_temp must be specified "
+            "when using the hybrid solver with m_elec_temp_style as parse_Te_ext_grid_function");
+    }
+
+    if (m_elec_temp_style == "read_from_file" && !pp_hybrid.query("read_Te_field_from_path", m_elec_temp_field_path)) {
+        Abort("hybrid_pic_model.read_Te_field_from_path must be specified "
+            "when using the hybrid solver with m_elec_temp_style as read_from_file");
     }
 
     const bool n0_ref_given = utils::parser::queryWithParser(pp_hybrid, "n0_ref", m_n0_ref);
