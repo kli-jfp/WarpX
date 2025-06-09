@@ -104,28 +104,26 @@ WarpX::InitEB ()
     } else if(!wkt_file.empty()) {
         std::ifstream wkt_multipolygon_file(wkt_file);
         std::string wkt_multipolygon(std::istreambuf_iterator<char>{wkt_multipolygon_file}, {});
-        amrex::Vector<amrex::Real> r_vec(0), z_vec(0);
-        amrex::Vector<size_t> jump_vec(0);
+        
+        amrex::Vector<amrex::Real> r_vec, z_vec;
+        amrex::Vector<size_t> jump_vec;
         parse_multipolygon(wkt_multipolygon, r_vec, z_vec, jump_vec);
-        amrex::Real *r_data, *z_data;
-        size_t *jump_data;
+
 #ifdef AMREX_USE_GPU
-        amrex::Gpu::DeviceVector<amrex::Real> r_gpuvec(r_vec.size());
-        amrex::Gpu::DeviceVector<amrex::Real> z_gpuvec(z_vec.size());
-        amrex::Gpu::DeviceVector<size_t> jump_gpuvec(jump_vec.size());
-        amrex::Gpu::copyAsync(amrex::Gpu::hostToDevice, r_vec.begin(), r_vec.end(), r_gpuvec.begin());
-        amrex::Gpu::copyAsync(amrex::Gpu::hostToDevice, z_vec.begin(), z_vec.end(), z_gpuvec.begin());
-        amrex::Gpu::copyAsync(amrex::Gpu::hostToDevice, jump_vec.begin(), jump_vec.end(), jump_gpuvec.begin());
+        amrex::Gpu::DeviceVector<amrex::Real> r_dvec(r_vec_cpu.size()), z_dvec(z_vec_cpu.size());
+        amrex::Gpu::DeviceVector<size_t> jump_dvec(jump_vec_cpu.size());
+
+        // Copy data from host to device
+        amrex::Gpu::copy(amrex::Gpu::hostToDevice, r_vec.begin(), r_vec.end(), r_dvec.begin());
+        amrex::Gpu::copy(amrex::Gpu::hostToDevice, z_vec.begin(), z_vec.end(), z_dvec.begin());
+        amrex::Gpu::copy(amrex::Gpu::hostToDevice, jump_vec.begin(), jump_vec.end(), jump_dvec.begin());
+
         amrex::Gpu::synchronize();
-        r_data = r_gpuvec.data();
-        z_data = z_gpuvec.data();
-        jump_data = jump_gpuvec.data();
+
+        PolygonXYIF polygonXY(r_dvec, z_dvec, jump_dvec);
 #else
-        r_data = r_vec.data();
-        z_data = z_vec.data();
-        jump_data = jump_data.data();
+        PolygonXYIF polygonXY(r_vec, z_vec, jump_vec);
 #endif
-        PolygonXYIF polygonXY(r_data, z_data, r_vec.size(), jump_data, jump_vec.size());
         auto latheif = amrex::EB2::lathe(polygonXY);
         auto gshop = amrex::EB2::makeShop(latheif, polygonXY);
         amrex::EB2::Build(gshop, Geom(maxLevel()), maxLevel(), maxLevel()+20);

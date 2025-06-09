@@ -5,6 +5,7 @@
 #include <AMReX_Vector.H>
 #include <AMReX_EB2_IF_Base.H>
 #include <cmath>
+#include <cassert>
 #include <algorithm>
 #include <regex>
 #include <boost/geometry/io/wkt/read.hpp>
@@ -19,7 +20,7 @@ typedef boost::geometry::model::multi_polygon<polygon_t> mpolygon_t;
 namespace
 {
     // For all implicit functions, >0: body; =0: boundary; <0: fluid
-    inline void add_jump(std::vector<amrex::Real> &r, std::vector<amrex::Real> &z, std::vector<size_t> &jumps)
+    inline void add_jump(amrex::Vector<amrex::Real> &r, amrex::Vector<amrex::Real> &z, amrex::Vector<size_t> &jumps)
     {
         if (jumps.size() > 0 && jumps[jumps.size() - 1] == r.size() - 1)
         {
@@ -33,11 +34,11 @@ namespace
     }
 
     template <typename T>
-    inline void expand_ring(const T &polygon, std::vector<amrex::Real> &r, std::vector<amrex::Real> &z, std::vector<size_t> &jumps)
+    inline void expand_ring(const T &polygon, amrex::Vector<amrex::Real> &r, amrex::Vector<amrex::Real> &z, amrex::Vector<size_t> &jumps)
     {
         for (auto p : polygon)
         {
-            if (p.x() == 0 && r[r.size() - 1] == 0)
+            if ((p.x() == 0) && (r.size() > 0) && (r[r.size() - 1] == 0))
                 add_jump(r, z, jumps);
             r.push_back(p.x());
             z.push_back(p.y());
@@ -45,7 +46,7 @@ namespace
         add_jump(r, z, jumps);
     }
 
-    void expand_multipolygon(const mpolygon_t &multipolygon, std::vector<amrex::Real> &r, std::vector<amrex::Real> &z, std::vector<size_t> &jumps)
+    void expand_multipolygon(const mpolygon_t &multipolygon, amrex::Vector<amrex::Real> &r, amrex::Vector<amrex::Real> &z, amrex::Vector<size_t> &jumps)
     {
         for (auto polygon : multipolygon)
         {
@@ -54,7 +55,7 @@ namespace
                 expand_ring(ring, r, z, jumps);
         }
     }
-    void parse_multipolygon(const std::string &wkt, std::vector<amrex::Real> &r, std::vector<amrex::Real> &z, std::vector<size_t> &jumps) {
+    void parse_multipolygon(const std::string &wkt, amrex::Vector<amrex::Real> &r, amrex::Vector<amrex::Real> &z, amrex::Vector<size_t> &jumps) {
         mpolygon_t multipolygon;
         boost::geometry::read_wkt(wkt, multipolygon);
 
@@ -64,13 +65,12 @@ namespace
         : public amrex::GPUable
     {
     public:
-        PolygonXYIF(amrex::Real* r, amrex::Real *z, size_t n, size_t *jumps, size_t n_jumps)
+        PolygonXYIF(amrex::Gpu::DeviceVector<amrex::Real> &r, amrex::Gpu::DeviceVector<amrex::Real> &z, amrex::Gpu::DeviceVector<size_t> &jumps)
             : m_r(r),
               m_z(z),
-              m_n(n),
-              m_jumps(jumps),
-              m_n_jumps(n_jumps)
+              m_jumps(jumps)
         {
+            assert(r.size() == z.size());
         }
         ~PolygonXYIF() {}
         PolygonXYIF(const PolygonXYIF &rhs) noexcept = default;
@@ -84,8 +84,8 @@ namespace
         {
             amrex::Real dist = 1;
             size_t i_jump = 0;
-            for (size_t i = 0; i < m_n - 1; i++) {
-                if(i_jump < m_n_jumps && m_jumps[i_jump] == i+1) {
+            for (size_t i = 0; i < m_r.size() - 1; i++) {
+                if(i_jump < m_jumps.size() && m_jumps[i_jump] == i+1) {
                     i_jump++;
                     continue;
                 }
@@ -100,11 +100,9 @@ namespace
             return this->operator()(AMREX_D_DECL(p[0], p[1], p[2]));
         }
     protected:
-        amrex::Real *m_r;
-        amrex::Real *m_z;
-        size_t m_n;
-        size_t *m_jumps;
-        size_t m_n_jumps;
+        amrex::Gpu::DeviceVector<amrex::Real> m_r;
+        amrex::Gpu::DeviceVector<amrex::Real> m_z;
+        amrex::Gpu::DeviceVector<size_t> m_jumps;
         AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
             amrex::Real
             intersects_outwards(amrex::Real r, amrex::Real z, int i) const noexcept
